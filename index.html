@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Visible Network Simulation</title>
+<style>
+  body { font-family: 'Segoe UI', sans-serif; background:#0f172a; color: white; margin:0; text-align:center; }
+  #controls { display:flex; flex-wrap:wrap; gap:15px; justify-content:center; padding: 15px; background: #1e293b; border-bottom: 2px solid #d0ef00; }
+  label { font-weight: bold; color: #94a3b8; }
+  input { width:60px; border-radius: 4px; border: 1px solid #475569; padding: 4px; background: #0f172a; color: white; }
+  button { padding:8px 25px; border:none; border-radius:6px; background:#10b981; color:white; cursor:pointer; font-weight: bold; transition: 0.3s; }
+  button:hover { background:#059669; transform: scale(1.05); }
+  #container { display:flex; flex-wrap:wrap; justify-content:center; gap:20px; padding: 20px; }
+  canvas { border-radius:12px; background:#000; border: 2px solid #ffff00; }
+  #graphContainer { width:500px; background:#1e293b; border-radius:12px; padding:20px; border: 1px solid #334155; }
+  #stats { margin-top:15px; font-family: 'Courier New', monospace; font-size: 1.3rem; color: #f8fafc; letter-spacing: 1px; }
+</style>
+</head>
+<body>
+
+<h1>Small-World Network</h1>
+
+<div id="controls">
+  <label>Rewire: <input type="number" id="pValue" value="0.1" step="0.01"></label>
+  <label>Inf Prob: <input type="number" id="infProb" value="0.25" step="0.01"></label>
+  <button id="startBtn">START SIMULATION</button>
+  <button id="resetBtn">RESET</button>
+</div>
+
+<div id="container">
+  <canvas id="networkCanvas" width="600" height="600"></canvas>
+  <div id="graphContainer">
+    <canvas id="sirGraph"></canvas>
+    <div id="stats">S: 1000 | I: 0 | R: 0</div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+const N = 1000; // Optimal density for line visibility
+const canvas = document.getElementById('networkCanvas');
+const ctx = canvas.getContext('2d');
+let nodes=[], edges=[], step=0, interval;
+
+function initNodes(){
+  nodes = [];
+  for(let i=0; i<N; i++) {
+    nodes.push({
+      id: i,
+      x: 30 + Math.random() * (canvas.width - 60),
+      y: 30 + Math.random() * (canvas.height - 60),
+      state: 'susceptible',
+      infectedStep: -1
+    });
+  }
+}
+
+function createEdges(){
+  const p = +document.getElementById('pValue').value;
+  edges = [];
+  // Har node ko 2 padosiyo se joda (Ring Lattice)
+  for(let i=0; i<N; i++){
+    edges.push({source: i, target: (i+1)%N});
+    // Rewiring for long-distance jumps
+    if(Math.random() < p) {
+      edges.push({source: i, target: Math.floor(Math.random()*N)});
+    }
+  }
+}
+
+function draw(){
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  
+  // DARK VISIBLE LINES
+  ctx.lineWidth = 0.8;
+  ctx.strokeStyle = "rgba(148, 163, 184, 0.4)"; // Dark Grayish lines
+  ctx.beginPath();
+  edges.forEach(e => {
+    let a = nodes[e.source], b = nodes[e.target];
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+  });
+  ctx.stroke();
+
+  // NODES
+  nodes.forEach(n => {
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, n.state === 'infected' ? 5 : 3, 0, Math.PI * 2);
+    
+    if(n.state === 'susceptible') {
+      ctx.fillStyle = '#3b82f6'; // Bright Blue
+      ctx.shadowBlur = 0;
+    } else if(n.state === 'infected') {
+      ctx.fillStyle = '#ff0000'; // Pure Red
+      ctx.shadowBlur = 15;
+      ctx.shadowColor = "#ff0000";
+    } else {
+      ctx.fillStyle = '#64748b'; // Muted Gray
+      ctx.shadowBlur = 0;
+    }
+    ctx.fill();
+    ctx.shadowBlur = 0; // Reset for other nodes
+  });
+}
+
+// Chart.js Setup
+const sirChart = new Chart(document.getElementById('sirGraph').getContext('2d'), {
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: [
+      { label: 'Susceptible', data: [], borderColor: '#3b82f6', borderWidth: 2, pointRadius: 0 },
+      { label: 'Infected', data: [], borderColor: '#ff0000', borderWidth: 3, pointRadius: 0 },
+      { label: 'Recovered', data: [], borderColor: '#64748b', borderWidth: 2, pointRadius: 0 }
+    ]
+  },
+  options: {
+    animation: false,
+    scales: { x: { display: false }, y: { beginAtZero: true, max: N, ticks: {color: '#94a3b8'} } },
+    plugins: { legend: { labels: { color: 'white' } } }
+  }
+});
+
+function updateSimulation(){
+  step++;
+  const prob = +document.getElementById('infProb').value;
+  let nextInfected = [];
+  
+  nodes.forEach(n => {
+    if(n.state === 'infected'){
+      edges.forEach(e => {
+        let t = null;
+        if(e.source === n.id) t = nodes[e.target];
+        else if(e.target === n.id) t = nodes[e.source];
+        if(t && t.state === 'susceptible' && Math.random() < prob) nextInfected.push(t);
+      });
+      if(step - n.infectedStep >= 12) n.state = 'recovered';
+    }
+  });
+
+  nextInfected.forEach(n => { 
+    if(n.state === 'susceptible'){ 
+      n.state='infected'; 
+      n.infectedStep = step; 
+    }
+  });
+
+  draw();
+  updateStats();
+  if(step > 5 && nodes.filter(n=>n.state==='infected').length === 0) clearInterval(interval);
+}
+
+function updateStats(){
+  const s = nodes.filter(n=>n.state==='susceptible').length;
+  const i = nodes.filter(n=>n.state==='infected').length;
+  const r = nodes.filter(n=>n.state==='recovered').length;
+  document.getElementById('stats').innerText = `S: ${s} | I: ${i} | R: ${r}`;
+  sirChart.data.labels.push(step);
+  sirChart.data.datasets[0].data.push(s);
+  sirChart.data.datasets[1].data.push(i);
+  sirChart.data.datasets[2].data.push(r);
+  sirChart.update();
+}
+
+startBtn.onclick = () => {
+  clearInterval(interval);
+  step = 0;
+  sirChart.data.labels = []; sirChart.data.datasets.forEach(ds => ds.data = []);
+  initNodes(); createEdges();
+  const startIdx = Math.floor(Math.random()*N);
+  nodes[startIdx].state = 'infected';
+  nodes[startIdx].infectedStep = 0;
+  interval = setInterval(updateSimulation, 80);
+};
+
+resetBtn.onclick = () => { clearInterval(interval); initNodes(); draw(); };
+initNodes(); draw();
+</script>
+</body>
+</html>
